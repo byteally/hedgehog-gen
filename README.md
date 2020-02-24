@@ -1,6 +1,8 @@
 # hedgehog-gen
 Customizable Gen for ADT using Generics
 
+[![Hackage](https://img.shields.io/hackage/v/hedgehog-gen.svg?logo=haskell)](https://hackage.haskell.org/package/hedgehog-gen)
+
 ## Tutorial
 
 ```haskell
