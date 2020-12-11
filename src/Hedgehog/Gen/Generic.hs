@@ -12,6 +12,9 @@
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE MultiParamTypeClasses #-}
 {-# LANGUAGE AllowAmbiguousTypes #-}
+{-# LANGUAGE MagicHash #-}
+{-# LANGUAGE TypeApplications #-}
+{-# LANGUAGE TupleSections #-}
 
 {-# LANGUAGE DeriveGeneric #-}
 module Hedgehog.Gen.Generic
@@ -23,6 +26,7 @@ module Hedgehog.Gen.Generic
   , byPos
   , GenList (..)
   , GenMap
+  , GMkGen
   ) where
 
 import GHC.Generics
@@ -36,7 +40,23 @@ import Data.Kind
 import Hedgehog
 import qualified Hedgehog.Gen as Gen
 import qualified Hedgehog.Range as Range
+import qualified Hedgehog.Internal.Shrink as Shrink
+import qualified Hedgehog.Internal.Gen as GenI
 import Data.Text
+import Data.Int
+import Data.Word
+import Data.List.NonEmpty (NonEmpty)
+import Data.Sequence (Seq)
+import Data.Map (Map)
+import Data.IntMap (IntMap)
+import Data.Set (Set)
+import Data.Vector (Vector)
+import qualified Data.Vector as V
+import Data.HashMap.Strict (HashMap)
+import qualified Data.HashMap.Strict as HMap
+import Data.HashSet (HashSet)
+import qualified Data.HashSet as HSet
+
 
 
 -- |'mkGen' creates a 'Gen.Gen' for any __/a/__ having 'Generic'.
@@ -50,7 +70,7 @@ mkGen genMap = mkGenWith GNil genMap
 --   It is same as 'mkGen', except that it takes HList of 'Gen.Gen's for all types not having 'Generic' instance in the transitive dependency of __/a/__
 mkGenWith :: forall a glist.
   ( Generic a, GMkGen (Rep a) glist, Typeable a
-  ) => GenList glist  -- ^ HList of 'Gen.Gen's for types not having 'Generic' instance  
+  ) => GenList glist  -- ^ HList of 'Gen.Gen's for types not having 'Generic' instance
     -> GenMap         -- ^ Map containing type-based and field-based overrides of `Gen.Gen`
     -> Hedgehog.Gen a -- ^ Generator for any __/a/__ having 'Generic' instance
 mkGenWith glist genMap = to <$> (gMkGen 1 glist (Proxy :: Proxy a) genMap)
@@ -59,6 +79,8 @@ mkGenWith glist genMap = to <$> (gMkGen 1 glist (Proxy :: Proxy a) genMap)
 data GenList (or :: [*]) where
   GNil :: GenList '[]
   (:&) :: Gen x -> GenList xs -> GenList (x ': xs)
+
+infixr 5 :&
 
 -- | Map to hold type-based and field-based overrides of `Gen.Gen`
 type GenMap = TypeRepMap Hedgehog.Gen
@@ -97,7 +119,7 @@ newtype Field s (field :: Symbol) t = Field {getFieldGen :: t}
 newtype Pos s (pos :: Nat) t = Pos {getPosGen :: t}
 
 
-  
+
 
 class GMkGen f (or ::[*]) where
   gMkGen :: (Typeable s) => Word -> GenList or -> Proxy s -> GenMap -> Hedgehog.Gen (f a)
@@ -109,7 +131,7 @@ instance (GMkGen f or, GMkGen g or) => GMkGen (f :+: g) or where
   gMkGen pos glist pxyS genMap  = Gen.choice [ L1 <$> gMkGen pos glist pxyS genMap
                                              , R1 <$> gMkGen pos glist pxyS genMap
                                              ]
-  
+
 instance (GMkGen f or) => GMkGen (C1 m f) or where
   gMkGen pos glist pxyS genMap= M1 <$> gMkGen pos glist pxyS genMap
 
@@ -141,7 +163,7 @@ instance ( Typeable a
             K1 (Custom a) -> K1 a
             K1 (Stock a) -> K1 a
 -}
-            
+
 instance ( Typeable a
          , KnownSymbol fn
          , GMkGen (K1 f (DervType (IsCustom a or) a)) or
@@ -176,15 +198,198 @@ instance ( Typeable a
 instance GMkGen (K1 f (DervType 'False Int)) '[] where
   gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.int Range.exponentialBounded
 
+instance GMkGen (K1 f (DervType 'False Int8)) '[] where
+  gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.int8 Range.exponentialBounded
+
+instance GMkGen (K1 f (DervType 'False Int16)) '[] where
+  gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.int16 Range.exponentialBounded
+
+instance GMkGen (K1 f (DervType 'False Int32)) '[] where
+  gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.int32 Range.exponentialBounded
+
+instance GMkGen (K1 f (DervType 'False Int64)) '[] where
+  gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.int64 Range.exponentialBounded
+
 instance GMkGen (K1 f (DervType 'False Word)) '[] where
   gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.word Range.exponentialBounded
 
+instance GMkGen (K1 f (DervType 'False Word8)) '[] where
+  gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.word8 Range.exponentialBounded
+
+instance GMkGen (K1 f (DervType 'False Word16)) '[] where
+  gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.word16 Range.exponentialBounded
+
+instance GMkGen (K1 f (DervType 'False Word32)) '[] where
+  gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.word32 Range.exponentialBounded
+
+instance GMkGen (K1 f (DervType 'False Word64)) '[] where
+  gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.word64 Range.exponentialBounded
+
+instance GMkGen (K1 f (DervType 'False Char)) '[] where
+  gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.alphaNum
+
 instance GMkGen (K1 f (DervType 'False Text)) '[] where
   gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.text (Range.constant 0 100) Gen.alphaNum
-  
+
 instance GMkGen (K1 f (DervType 'False Bool)) '[] where
   gMkGen _ _ _ _ = (K1 . Stock) <$> Gen.bool
-  
+
+instance GMkGen (K1 f (DervType 'False Double)) '[] where
+  gMkGen _ _ _ _ = fmap (K1 . Stock) $ Gen.double $ Range.exponentialFloat (-10) 10
+
+instance GMkGen (K1 f (DervType 'False Float)) '[] where
+  gMkGen _ _ _ _ = fmap (K1 . Stock) $ Gen.float $ Range.exponentialFloat (-10) 10
+
+instance
+  ( GMkGen (K1 f (DervType (IsCustom a ors) a)) ors,
+    Typeable a
+  ) => GMkGen (K1 f (DervType 'False (Maybe a))) ors where
+  gMkGen p glist _ gmap =
+    let
+      g = gMkGen @(K1 f (DervType (IsCustom a ors) a)) p glist (Proxy @a) gmap
+      toMaybe :: K1 k (DervType (IsCustom a ors) a) b -> K1 k (DervType 'False (Maybe a)) b
+      toMaybe (K1 dva) = case dva of
+        Stock a -> K1 (Stock $ Just a)
+        Custom a -> K1 (Stock $ Just a)
+    in Gen.sized $ \n ->
+      Gen.frequency [ (2, pure $ K1 $ Stock Nothing),
+                      (1 + fromIntegral n, fmap toMaybe g)
+                    ]
+
+instance
+  ( GMkGen (K1 f (DervType (IsCustom a ors) a)) ors,
+    Typeable a
+  ) => GMkGen (K1 f (DervType 'False [a])) ors where
+  gMkGen p glist _ gmap =
+    let
+      g = gMkGen @(K1 f (DervType (IsCustom a ors) a)) p glist (Proxy @a) gmap
+      getVal :: K1 k (DervType (IsCustom a ors) a) b -> a
+      getVal (K1 dva) = case dva of
+        Stock a -> a
+        Custom a -> a
+    in fmap (K1. Stock) $ Gen.list (Range.constant 0 10) $ fmap getVal g
+
+instance
+  ( GMkGen (K1 f (DervType (IsCustom a ors) a)) ors,
+    Typeable a
+  ) => GMkGen (K1 f (DervType 'False (NonEmpty a))) ors where
+  gMkGen p glist _ gmap =
+    let
+      g = gMkGen @(K1 f (DervType (IsCustom a ors) a)) p glist (Proxy @a) gmap
+      getVal :: K1 k (DervType (IsCustom a ors) a) b -> a
+      getVal (K1 dva) = case dva of
+        Stock a -> a
+        Custom a -> a
+    in fmap (K1. Stock) $ Gen.nonEmpty (Range.constant 1 10) $ fmap getVal g
+
+instance
+  ( GMkGen (K1 f (DervType (IsCustom a ors) a)) ors,
+    Typeable a
+  ) => GMkGen (K1 f (DervType 'False (Seq a))) ors where
+  gMkGen p glist _ gmap =
+    let
+      g = gMkGen @(K1 f (DervType (IsCustom a ors) a)) p glist (Proxy @a) gmap
+      getVal :: K1 k (DervType (IsCustom a ors) a) b -> a
+      getVal (K1 dva) = case dva of
+        Stock a -> a
+        Custom a -> a
+    in fmap (K1. Stock) $ Gen.seq (Range.constant 0 10) $ fmap getVal g
+
+
+instance
+  ( GMkGen (K1 f (DervType (IsCustom a ors) a)) ors,
+    Typeable a
+  ) => GMkGen (K1 f (DervType 'False (Vector a))) ors where
+  gMkGen p glist _ gmap =
+    let
+      g = gMkGen @(K1 f (DervType (IsCustom a ors) a)) p glist (Proxy @a) gmap
+      getVal :: K1 k (DervType (IsCustom a ors) a) b -> a
+      getVal (K1 dva) = case dva of
+        Stock a -> a
+        Custom a -> a
+    in fmap (K1. Stock . V.fromList) $ Gen.list (Range.constant 0 10) $ fmap getVal g
+
+
+instance
+  ( GMkGen (K1 f (DervType (IsCustom k ors) k)) ors,
+    GMkGen (K1 f (DervType (IsCustom a ors) a)) ors,
+    Ord k,
+    Typeable k,
+    Typeable a
+  ) => GMkGen (K1 f (DervType 'False (Map k a))) ors where
+  gMkGen p glist _ gmap =
+    let
+      k = getVal <$> gMkGen @(K1 f (DervType (IsCustom k ors) k)) p glist (Proxy @k) gmap
+      v = getVal <$> gMkGen @(K1 f (DervType (IsCustom a ors) a)) p glist (Proxy @a) gmap
+      kv = (,) <$> k <*> v
+      getVal :: K1 f (DervType (IsCustom v ors) v) x -> v
+      getVal (K1 dva) = case dva of
+        Stock a -> a
+        Custom a -> a
+    in fmap (K1. Stock) $ Gen.map (Range.constant 0 10) kv
+
+instance
+  ( GMkGen (K1 f (DervType (IsCustom a ors) a)) ors,
+    GMkGen (K1 f (DervType (IsCustom b ors) b)) ors,
+    Typeable a,
+    Typeable b
+  ) => GMkGen (K1 f (DervType 'False (Either a b))) ors where
+  gMkGen p glist _ gmap =
+    let
+      a = getVal <$> gMkGen @(K1 f (DervType (IsCustom a ors) a)) p glist (Proxy @a) gmap
+      b = getVal <$> gMkGen @(K1 f (DervType (IsCustom b ors) b)) p glist (Proxy @b) gmap
+      getVal :: K1 k (DervType (IsCustom v ors) v) x -> v
+      getVal (K1 dva) = case dva of
+        Stock v -> v
+        Custom v -> v
+    in fmap (K1. Stock) $ Gen.sized $ \n ->
+      Gen.frequency [ (2, fmap Left a),
+                      (1 + fromIntegral n, fmap Right b)
+                    ]
+
+instance
+  ( GMkGen (K1 f (DervType (IsCustom a ors) a)) ors,
+    Ord a,
+    Typeable a
+  ) => GMkGen (K1 f (DervType 'False (Set a))) ors where
+  gMkGen p glist _ gmap =
+    let
+      g = gMkGen @(K1 f (DervType (IsCustom a ors) a)) p glist (Proxy @a) gmap
+      getVal :: K1 k (DervType (IsCustom a ors) a) b -> a
+      getVal (K1 dva) = case dva of
+        Stock a -> a
+        Custom a -> a
+    in fmap (K1. Stock) $ Gen.set (Range.constant 0 10) $ fmap getVal g
+
+{- TODO:
+instance
+  ( GMkGen (K1 f (DervType (IsCustom a ors) a)) ors,
+    Ord a,
+    Typeable a
+  ) => GMkGen (K1 f (DervType 'False (HashSet a))) ors where
+  gMkGen p glist _ gmap =
+    let
+      g = gMkGen @(K1 f (DervType (IsCustom a ors) a)) p glist (Proxy @a) gmap
+      getVal :: K1 k (DervType (IsCustom a ors) a) b -> a
+      getVal (K1 dva) = case dva of
+        Stock a -> a
+        Custom a -> a
+    in fmap (K1. Stock) $ hashset (Range.constant 0 10) $ fmap getVal g
+
+hashmap :: (MonadGen m, Ord k) => Range Int -> m (k, v) -> m (HashMap k v)
+hashmap range gen =
+  GenI.sized $ \size ->
+    GenI.ensure ((>= Range.lowerBound size range) . HMap.size) .
+    fmap HMap.fromList .
+    (sequence =<<) .
+    GenI.shrink Shrink.list $ do
+      k <- GenI.integral_ range
+      uniqueByKey k gen
+
+hashset :: (MonadGen m, Ord a) => Range Int -> m a -> m (HashSet a)
+hashset range gen =
+  fmap HMap.keysSet . fmap range $ fmap (, ()) gen
+-}
 
 instance ( Typeable t
          , Typeable x
@@ -192,7 +397,7 @@ instance ( Typeable t
   gMkGen _ (gen :& GNil) _ _ = case (eqT :: Maybe ( x :~: t)) of
     Just Refl -> (K1 . Stock) <$> gen
     Nothing -> error "Panic: Invariant violated"
-    
+
 instance ( Typeable t
          , Typeable x1
          , GMkGen (K1 f (DervType 'False t)) (x2 ': xs)
@@ -201,25 +406,60 @@ instance ( Typeable t
     Just Refl -> (K1 . Stock) <$> gen
     Nothing -> gMkGen pos glist pxy genMap
 
-instance (Typeable a, Generic a, GMkGen (Rep a) '[]) => GMkGen (K1 f (DervType 'True a)) '[] where
+instance (Typeable a, Generic a, GMkGen (Rep a) xs) => GMkGen (K1 f (DervType 'True a)) xs where
   gMkGen pos glist _ genMap = (K1 . Custom . to) <$> (gMkGen pos glist (Proxy :: Proxy a) genMap)
-  
+
 
 data DervType :: Bool -> Type -> Type where
-  Custom :: a -> DervType 'True a 
-  Stock :: a -> DervType 'False a 
+  Custom :: a -> DervType 'True a
+  Stock :: a -> DervType 'False a
+
+instance Functor (DervType b) where
+  fmap f (Custom v) = Custom (f v)
+  fmap f (Stock v) = Stock (f v)
 
 type family IsCustom t (xs :: [*]) where
   IsCustom Int _  = 'False
+  IsCustom Int8 _ = 'False
+  IsCustom Int16 _ = 'False
+  IsCustom Int32 _ = 'False
+  IsCustom Int64 _ = 'False
   IsCustom Bool _ = 'False
+  IsCustom Char _ = 'False
   IsCustom Word _ = 'False
+  IsCustom Word8 _ = 'False
+  IsCustom Word16 _ = 'False
+  IsCustom Word32 _ = 'False
+  IsCustom Word64 _ = 'False
   IsCustom Text _ = 'False
+  IsCustom Double _ = 'False
+  IsCustom Float _ = 'False
+  IsCustom (Maybe _) _ = 'False
+  IsCustom [_] _ = 'False
+  IsCustom (Seq _) _ = 'False
+  IsCustom (NonEmpty _) _ = 'False
+  IsCustom (Vector _) _ = 'False
+  IsCustom (Map _ _) _ = 'False
+  IsCustom (IntMap _) _ = 'False
+  IsCustom (Set _) _ = 'False
+  IsCustom (HashMap _ _) _ = 'False
+  IsCustom (HashSet _) _ = 'False
+  IsCustom (Either _ _) _ = 'False
   IsCustom t ts   = IsNotElem t ts
 
 type family IsNotElem t (xs :: [*]) :: Bool where
   IsNotElem t '[]       = 'True
   IsNotElem t (t ': ts) = 'False
   IsNotElem t (_ ': ts) = IsNotElem t ts
+
+class SingBool (b ::Bool) where
+  singBool :: Proxy# b -> Bool
+
+instance SingBool 'True where
+  singBool _ = True
+
+instance SingBool 'False where
+  singBool _ = False
 
 type family FromEither (m :: Either ErrorMessage Constraint) :: Constraint where
   FromEither ('Left ex) = TypeError ex
@@ -231,8 +471,8 @@ type family ValidateSelK (m :: Either ErrorMessage Constraint) s (srep :: * -> *
 
 type family ValidatePosK (m :: Either ErrorMessage Constraint) s (srep :: * -> *) (pos :: Nat) (cpos :: Nat) t :: Either ErrorMessage Constraint where
   ValidatePosK ('Left ex) s srep pos newpos t = ValidatePos s srep pos newpos t
-  ValidatePosK ('Right c) _ _ _ _ _         = 'Right c  
-  
+  ValidatePosK ('Right c) _ _ _ _ _         = 'Right c
+
 type family ValidateSel s (srep :: * -> *) (fld :: Symbol) t :: Either ErrorMessage Constraint where
   ValidateSel s (D1 i f) fld t = ValidateSel s f fld t
   ValidateSel s (f :+: g) fld t = ValidateSelK (ValidateSel s f fld t) s g fld t
@@ -249,6 +489,4 @@ type family ValidatePos s (srep :: * -> *) (pos :: Nat) (cpos ::Nat) t :: Either
   ValidatePos s (C1 i c) pos cpos t = ValidatePos s c pos cpos t
   ValidatePos s (f :*: g) pos cpos t = ValidatePosK (ValidatePos s f pos cpos t) s g pos (cpos+1) t
   ValidatePos s (S1 ('MetaSel _ _ _ _) (K1 i t1)) pos pos t2 = 'Right (t1 ~ t2)
-  ValidatePos s (S1 ('MetaSel _ _ _ _) (K1 i _)) pos2 _ _ = 'Left ('Text "type '" ':<>: 'ShowType s ':<>: 'Text "' does not have a positon numbered: " ':<>: 'ShowType pos2)  
-  
-  
+  ValidatePos s (S1 ('MetaSel _ _ _ _) (K1 i _)) pos2 _ _ = 'Left ('Text "type '" ':<>: 'ShowType s ':<>: 'Text "' does not have a positon numbered: " ':<>: 'ShowType pos2)

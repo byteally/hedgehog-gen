@@ -3,26 +3,42 @@ cabal-version:       2.4
 name:                hedgehog-gen
 version:             0.1.0.0
 synopsis:            Customizable Gen for ADT using Generics
--- description:
+description:         Customizable Gen for ADT using Generics with the abilites to do type-based and field-based overrides of Gen.
 homepage:            https://github.com/byteally/hedgehog-gen
--- bug-reports:
+bug-reports:         https://github.com/byteally/hedgehog-gen/issues
 license:             BSD-3-Clause
 license-file:        LICENSE
 author:              Magesh
 maintainer:          magesh85@gmail.com
--- copyright:
+copyright:           © 2020 ByteAlly
 category:            Testing
 extra-source-files:  CHANGELOG.md, README.md
 
 library
   exposed-modules:     Hedgehog.Gen.Generic
   -- other-modules:
-  -- other-extensions:
   build-depends:       base        >=4.9 && <5
                      , hedgehog    >1.0 && <1.1
                      , bytestring  == 0.10.*
                      , text        >=1.1 && <1.3
                      , typerep-map >= 0.3.2
+                     , containers  >= 0.6.2.1
+                     , vector      >= 0.12.1.2
+                     , unordered-containers >= 0.2.10.0
   hs-source-dirs:      src
   ghc-options:         -Wall
   default-language:    Haskell2010
+
+test-suite hedgehog-gen-test
+  type:                exitcode-stdio-1.0
+  hs-source-dirs:      test
+  main-is:             Spec.hs
+--  other-modules:       
+  build-depends:       base
+                     , hedgehog-gen
+                     , hedgehog >1.0 && <1.1
+                     , text
+  ghc-options:         -Wall -threaded -rtsopts -with-rtsopts=-N
+  default-language:    Haskell2010
+
+
